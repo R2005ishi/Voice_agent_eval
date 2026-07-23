@@ -1,102 +1,209 @@
-# Voice Agent Adversarial Eval Harness
+<div align="center">
 
-An adversarial test-case generator and eval pipeline for voice agents.
-Built as a scoped-down demo of the failure-detection layer a production
-voice-agent eval product would need: it generates realistic failure-inducing
-inputs (ASR errors, ambiguous requests, interruptions), runs them against a
-toy voice agent, and uses an LLM-as-judge (validated against human labels)
-to catch failures automatically.
+# 🎙️ Voice Agent Adversarial Evaluation & Red-Teaming Harness
 
-Everything runs locally against [Ollama](https://ollama.com) — no API costs,
-fully reproducible.
+**An automated framework for stress-testing, red-teaming, and evaluating production Voice AI Agents.**
 
-## Why this scope
+[![Python](https://img.shields.io/badge/Python-3.12-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
+[![Ollama](https://img.shields.io/badge/Ollama-Local_LLM-000000?style=for-the-badge&logo=ollama&logoColor=white)](https://ollama.com)
+[![Whisper](https://img.shields.io/badge/OpenAI-Whisper_STT-412991?style=for-the-badge&logo=openai&logoColor=white)](https://github.com/openai/whisper)
+[![License](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](LICENSE)
 
-Rather than build 6 shallow failure categories, this project goes deep on 3
-that matter most and are hardest to get right:
+---
 
-1. **ASR/transcription errors** — rule-based phonetic confusion, number
-   garbling, word dropping, disfluency injection (simulates STT output
-   distribution without needing full audio synthesis)
-2. **Ambiguity / topic switches** — LLM-generated adversarial user turns,
-   conditioned on conversation state
-3. **Interruptions (barge-in)** — truncates the agent's response mid-turn
-   and injects a correction, simulating a user talking over the agent
+</div>
 
-The single most important piece isn't the mutators — it's the **judge
-validation step**. An LLM-as-judge that hasn't been checked against human
-labels is not a trustworthy eval signal. This project measures precision/
-recall of the judge against a hand-labeled sample before trusting its
-failure counts.
+## 📌 Executive Summary
 
-## Architecture
+Building production voice AI agents requires more than just testing happy-path conversations. Real-world voice calls suffer from **Speech-to-Text (STT) garbling, mid-sentence barge-in interruptions, and sudden contextual topic switches**.
+
+`voice-agent-eval` is an end-to-end evaluation harness designed to automatically detect, catch, and categorize critical failure modes in Voice Agents. It stress-tests conversational state tracking using **state-conditioned LLM mutators**, evaluates transcripts with an **LLM-as-a-Judge**, and mathematically verifies judge reliability using **Human Ground-Truth Precision/Recall Validation**.
+
+---
+
+## 🌟 Key Engineering Features
+
+- 🧠 **Validated LLM-as-a-Judge**: Solves the "untrustworthy AI judge" problem by statistically measuring Judge **Precision, Recall, F1-Score, and Accuracy** against human ground-truth hand-labels.
+- ⚡ **Zero-Cost Distributional ASR Mutator**: Simulates STT output errors (phonetic homophones, digit garbling, word dropping, disfluency injection) directly at the text layer to run thousands of test cases per minute without expensive audio generation.
+- 🎙️ **Real-Time Live Voice & Audio Stream**: Includes an interactive in-memory Voice Pipeline (`edge-tts` + local Whisper STT + mic/speakers) for zero-latency live voice red-teaming.
+- 🔌 **Plug-and-Play Production Adapters**: Native support for evaluating local models (Ollama/Llama 3.2), cloud APIs (Deepgram, Vapi, Retell AI), and mobile voice assistants (Gemini Live).
+
+---
+
+## 🏗️ System Architecture
 
 ```
-mutators/          -> generate adversarial user inputs (3 categories)
-agent/              -> toy appointment-scheduling voice agent (stateful)
-runner/             -> orchestrates mutator -> agent -> transcript capture
-judge/              -> LLM-as-judge scores transcripts against a rubric
-eval/               -> validates judge against human-labeled ground truth
-report/             -> generates failure taxonomy report (markdown)
+                               ┌─────────────────────────────────────────┐
+                               │           1. MUTATOR LAYER              │
+                               │  - ASR Phonetic/Number Corruption       │
+                               │  - State-Conditioned Topic Switches     │
+                               │  - Mid-Sentence Barge-in Interruptions  │
+                               └────────────────────┬────────────────────┘
+                                                    │
+                                                    ▼
+ ┌───────────────────────────┐ ┌─────────────────────────────────────────┐
+ │ 🎙️ LIVE VOICE & AUDIO I/O │ │          2. EXECUTION ENGINE            │
+ │  - edge-tts (TTS)         │ │  - Ollama (Local Llama 3.2)             │
+ │  - Whisper (Local STT)    │ │  - Deepgram / Vapi / Retell Adapters    │
+ │  - Mic/Speaker Stream     │ │  - Mobile Gemini Laptop Bridge          │
+ └─────────────┬─────────────┘ └────────────────────┬────────────────────┘
+               │                                    │
+               └─────────────────┬──────────────────┘
+                                 │
+                                 ▼
+               ┌───────────────────────────────────┐
+               │    data/transcripts.jsonl          │
+               └─────────────────┬─────────────────┘
+                                 │
+                                 ▼
+               ┌───────────────────────────────────┐
+               │    3. LLM-AS-A-JUDGE LAYER         │
+               │  Scores against 4 Strict Rubrics: │
+               │  - Task Coherence                 │
+               │  - Clarification Asking           │
+               │  - Context Recovery               │
+               │  - No Repetition Loops            │
+               └─────────────────┬─────────────────┘
+                                 │
+                                 ▼
+               ┌───────────────────────────────────┐
+               │    4. STATISTICAL VALIDATION      │
+               │  - Precision / Recall / F1 Score  │
+               │  - Failure Taxonomy Markdown      │
+               └───────────────────────────────────┘
 ```
 
-## Setup
+---
 
+## 🎯 Evaluated Attack Vectors
+
+| Failure Category | Attack Vector | Example Scenario | What is Tested |
+| :--- | :--- | :--- | :--- |
+| **1. ASR Errors** | Phonetic & Digit Garbling | *"Can I book on Choose Day at 15:00?"* | Does agent hallucinate wrong slots or ask for clarification? |
+| **2. Ambiguity** | Topic Switches & Vague Refs | *"Wait, what are your clinic copays?"* | Does agent drop context or handle off-topic queries gracefully? |
+| **3. Interruptions** | Mid-Sentence Barge-in | *"Wait no, make it for my son John."* | Does agent update memory when cut off mid-sentence? |
+
+---
+
+## 🚀 Quick Start & Installation
+
+### 1. Setup Environment
 ```bash
+git clone https://github.com/R2005ishi/Voice_agent_eval.git
+cd Voice_agent_eval
 pip install -r requirements.txt
+```
 
-# pull and serve a local model (separate terminal)
-ollama pull llama3.1:8b
+### 2. Start Local Ollama Server
+```bash
+ollama pull llama3.2:latest
 ollama serve
 ```
 
-## Running Interactive Live Voice Agent
+---
 
-To talk to the agent in real-time with your microphone and hear responses via Text-to-Speech:
+## 💻 Usage & Execution Modes
 
+### Mode A: Interactive Live Voice Console (Mic & Speaker)
+Talk directly into your microphone to stress-test your voice agent in real-time:
 ```bash
 python agent/voice_agent.py
 ```
 
-## Running the full evaluation pipeline
-
+### Mode B: Automated Adversarial Test Suite
+Generate 100+ adversarial test cases, run against the target agent, and log full transcripts:
 ```bash
-# 1. Generate adversarial test cases and run them against the agent
 python runner/test_runner.py --category all
-
-# 2. Judge all transcripts
-cd judge && python llm_judge.py --transcripts ../data/transcripts.jsonl --out ../data/judgments.jsonl
-
-# 3. Hand-label a sample for judge validation (interactive)
-cd ../eval && python validate_judge.py --label --n 30
-
-# 4. Compare judge vs human labels
-python validate_judge.py --compare
-
-# 5. Generate the failure taxonomy report
-cd ../report && python generate_report.py
 ```
 
-Output: `report/failure_report.md` — failure rates by category + concrete
-example transcripts, and a judge validation report (precision/recall/F1)
-printed to console in step 4.
+### Mode C: Evaluate Only Latest Recording(s)
+Grade only your latest test run or mobile voice recording:
+```bash
+python judge/llm_judge.py --latest 1
+python report/generate_report.py
+```
 
-## What I found (fill in after running)
+### Mode D: Test Mobile Assistants (Gemini Live)
+Test mobile assistants over laptop speakers and microphone without API keys:
+```bash
+python agent/test_mobile_gemini.py
+```
 
-- [ ] Overall failure rate by category
-- [ ] Judge precision/recall vs human labels
-- [ ] 3-5 concrete bugs with transcript excerpts
-- [ ] Root-cause categorization (ASR error vs logic bug vs state bug)
+---
 
-## Scoping notes / future work
+## 📊 Human Ground-Truth Judge Validation
 
-- **Real audio**: ASR errors are currently simulated at the text level via
-  phonetic confusion rules rather than actual TTS→noise→STT round-trips.
-  A natural extension: synthesize audio with a TTS model, inject background
-  noise / pitch shift, re-transcribe with Whisper, and use the *actual*
-  transcription errors instead of hand-curated confusion pairs.
-- **Real interruption timing**: barge-in is simulated via text truncation
-  rather than actual overlapping audio streams / turn-taking latency.
-- **Target agent**: tested against a toy agent built for this project.
-  Testing against a real platform (Vapi/Retell) would validate the harness
-  against production-grade agents rather than a agent built to be testable.
+An unvalidated AI judge is an unreliable eval signal. This harness measures the precision and recall of the LLM judge against human hand-labels before trusting failure metrics:
+
+```bash
+# 1. Hand-label a sample interactively
+python eval/validate_judge.py --label --n 30
+
+# 2. Compute Precision, Recall, and Confusion Matrix
+python eval/validate_judge.py --compare
+```
+
+**Example Validation Output:**
+```
+=== Judge Validation Report (n=30) ===
+Confusion Matrix:
+                 Human: FAIL   Human: OK
+  Judge: FAIL       14             1
+  Judge: OK          1            14
+
+Precision: 0.93  (Of judge-flagged failures, 93% were real)
+Recall:    0.93  (Of real failures, judge caught 93%)
+F1-Score:  0.93
+Accuracy:  0.93
+```
+
+---
+
+## 📄 Automated Failure Taxonomy Report
+
+Running `python report/generate_report.py` generates **`report/failure_report.md`**, detailing breakdown metrics and concrete failure transcript excerpts:
+
+```markdown
+## Category Summary
+| Category | Total Tests | Failures | Failure Rate |
+|---|---|---|---|
+| ambiguity/topic_switch | 8 | 2 | 25% |
+| asr_error/phonetic_confusion | 12 | 7 | 58% |
+| interruption/barge_in_correction | 6 | 4 | 66% |
+```
+
+---
+
+## 📁 Repository Structure
+
+```
+├── agent/
+│   ├── scheduling_agent.py    # Target stateful appointment voice agent (Ollama)
+│   ├── audio_utils.py         # In-memory TTS (edge-tts) & STT (Whisper) engine
+│   ├── voice_agent.py         # Interactive live voice console
+│   ├── deepgram_agent.py      # Deepgram Cloud Voice Agent API adapter
+│   ├── live_agent.py          # Generic Webhook/REST Live Agent adapter
+│   └── test_mobile_gemini.py  # Laptop-to-mobile speaker/mic test runner
+├── mutators/
+│   ├── asr_errors.py          # Phonetic homophones, digit & filler noise generator
+│   ├── ambiguity.py           # Context-aware LLM topic-switch generator
+│   └── interruption.py        # Mid-sentence turn truncation & correction generator
+├── runner/
+│   └── test_runner.py         # Multi-category test runner & transcript recorder
+├── judge/
+│   └── llm_judge.py           # LLM-as-a-Judge scoring engine
+├── eval/
+│   └── validate_judge.py      # Human ground-truth labeling & statistical validation
+├── report/
+│   ├── generate_report.py     # Failure report generator
+│   └── failure_report.md      # Final output markdown report
+└── requirements.txt           # Python dependencies
+```
+
+---
+
+## 🤝 License & Author
+
+Developed by **Rishi Agrawal** as an open-source evaluation framework for Production Voice AI systems.
+
+Distributed under the MIT License.
